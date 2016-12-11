@@ -1,2 +1,2 @@
 # jejemaes-server
-Internal code for future VPS config
+Internal code for VPS config
