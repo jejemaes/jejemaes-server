@@ -175,8 +175,8 @@ def lemp_create_account(domain, user, password):
 
     # create mysql user and database
     mysql_config = _get_config('mysql')
-    if fabtools.mysql.user_exists(user):
+    if fabtools.mysql.user_exists(user, **mysql_config):
         fabtools.mysql.user_create(user, password, **mysql_config)
 
-    if fabtools.mysql.database_exists(user):
+    if fabtools.mysql.database_exists(user, **mysql_config):
         fabtools.mysql.create_database(user, owner=user, **mysql_config)
