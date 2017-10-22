@@ -1,7 +1,7 @@
 [${domain}]
 user = ${unix_user}
 group = ${unix_group}
-listen = /var/run/php5-fpm-${unix_user}.sock
+listen = /var/run/php7-fpm-${unix_user}.sock
 listen.owner = www-data
 listen.group = www-data
 php_admin_value[disable_functions] = exec,passthru,shell_exec,system
