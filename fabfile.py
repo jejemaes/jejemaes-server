@@ -68,7 +68,6 @@ def _get_config(section_prefix):
 # checkout the tools code to execute it.
 #----------------------------------------------------------
 
-
 @as_('root')
 def _setup_packages():
     """ Method to install common packages """
@@ -174,9 +173,8 @@ def lemp_create_account(domain, user, password):
     fabtools.service.restart('nginx')
 
     # create mysql user and database
-    mysql_config = _get_config('mysql')
-    if fabtools.mysql.user_exists(user, **mysql_config):
-        fabtools.mysql.user_create(user, password, **mysql_config)
+    if not fabtools.mysql.user_exists(user):
+        fabtools.mysql.create_user(user, password)
 
-    if fabtools.mysql.database_exists(user, **mysql_config):
-        fabtools.mysql.create_database(user, owner=user, **mysql_config)
+    if not fabtools.mysql.database_exists(user):
+        fabtools.mysql.create_database(user, owner=user)

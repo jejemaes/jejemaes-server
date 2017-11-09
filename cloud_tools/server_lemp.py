@@ -34,6 +34,13 @@ def setup_lemp_server(upgrade=False):
         log.warn('Mysql server will be installed in non interactive mode. DO NOT FORGET TO SET THE ROOT PASSWORD, since the default one will be %s.', mysql_root_pass)
         run("""echo "mysql-server-5.7 mysql-server/root_password password %s" | sudo debconf-set-selections""" % (mysql_root_pass,))
         run("""echo "mysql-server-5.7 mysql-server/root_password_again password %s" | sudo debconf-set-selections""" % (mysql_root_pass,))
+        # create a file with mysql root credentials to avoid passing those in parameters Otherwise, since mysql 5.6 we get the 
+        # warning "Using a password on the command line interface can be insecure".
+        file_path = '/root/.my.cnf'
+        if not os.path.isfile(file_path):
+            file_content = templates.render_template('my-cnf.txt', {'mysql_root_pass': mysql_root_pass})
+            with open(file_path, 'w') as file_conf:
+                file_conf.write(file_content)
 
     log.info("Installing deb dependencies ...")
     debs_to_install = """
