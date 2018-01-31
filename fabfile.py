@@ -156,6 +156,7 @@ def update_lemp_server():
 @as_('root')
 def lemp_create_account(domain, user, password):
     group = user
+    home_dir = '/home/%s' % (user,)
 
     # create unix group
     if not fabtools.group.exists(group):
@@ -163,7 +164,6 @@ def lemp_create_account(domain, user, password):
 
     # create unix user
     if not fabtools.user.exists(user):
-        home_dir = '/home/%s' % (user,)
         fabtools.user.create(user, group=group, home=home_dir, shell='/bin/bash')
 
     # create php fpm and nginx files, and restart services
@@ -178,3 +178,12 @@ def lemp_create_account(domain, user, password):
 
     if not fabtools.mysql.database_exists(user):
         fabtools.mysql.create_database(user, owner=user)
+
+    # FTP SQL entries
+    unix_group_id = fabtools.utils.run_as_root("id -g %s" % (user,))
+    unix_user_id = fabtools.utils.run_as_root("id -u %s" % (user,))
+
+    query = """INSERT IGNORE INTO meta.ftpgroup (groupname, gid, members) VALUES ("%s", %s, "%s");""" % (user, unix_group_id, user)
+    puts(fabtools.mysql.query(query))
+    query = """INSERT IGNORE INTO meta.ftpuser (userid, passwd, uid, gid, homedir, shell, count, accessed, modified) VALUES ("%s", "%s", %s, %s, "%s", "/sbin/nologin", 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);""" % (user, password, unix_user_id, unix_group_id, home_dir)
+    puts(fabtools.mysql.query(query))

@@ -12,6 +12,7 @@ def command(func):
 HERE = os.path.dirname(os.path.realpath(__file__))
 DIR_FILES = HERE + '/../cloud_files/'
 DIR_TEMPLATE = HERE + '/../tmpl/'
+DIR_SCRIPTS = HERE + '/../scripts/'
 
 from . import server_lemp
 from . import server_odoo

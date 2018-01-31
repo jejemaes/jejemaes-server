@@ -1,3 +1,4 @@
+USE meta;
 
 -- Database Meta Table
 CREATE TABLE IF NOT EXISTS client_databases (
@@ -50,8 +51,8 @@ CREATE TABLE IF NOT EXISTS ftpuser (
     homedir varchar(255) NOT NULL default '',
     shell varchar(16) NOT NULL default '/sbin/nologin',
     count int(11) NOT NULL default '0',
-    accessed datetime NOT NULL default '0000-00-00 00:00:00',
-    modified datetime NOT NULL default '0000-00-00 00:00:00',
+    accessed datetime NOT NULL default CURRENT_TIMESTAMP,
+    modified datetime NOT NULL default CURRENT_TIMESTAMP,
     db_id int(10) unsigned,
     PRIMARY KEY (id),
     UNIQUE KEY userid (userid),
