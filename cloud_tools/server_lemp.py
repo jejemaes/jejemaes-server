@@ -59,13 +59,20 @@ def setup_lemp_server(upgrade=False):
     debs_to_install = """
         mysql-server-5.7
         nginx
+        php-imagick
         php7.0
-        php7.0-fpm
-        php7.0-gd
-        php7.0-mysql
         php7.0-common
         php7.0-curl
+        php7.0-fpm
+        php7.0-gd
+        php7.0-json
+        php7.0-intl
+        php7.0-mbstring
+        php7.0-mcrypt
+        php7.0-mysql
         php7.0-opcache
+        php7.0-xml
+        php7.0-zip
         proftpd
         proftpd-mod-mysql
     """.split()
