@@ -2,10 +2,12 @@
 import ConfigParser
 import io
 import os
+import re
 
-from fabric.api import task, env, run, cd, sudo, hide
+from fabric.api import task, env, run, cd, sudo, put, hide, hosts, local, get, execute
 from fabric.colors import red, yellow, green, blue, white
-from fabric.utils import warn, puts
+from fabric.utils import abort, puts, fastprint, warn
+
 
 import fabtools
 import fabtools.require
@@ -13,12 +15,28 @@ import fabtools.require
 from functools import wraps
 
 
+HERE = os.path.dirname(os.path.realpath(__file__))
 DIR_SCRIPT = '/root/cloud/'
+DIR_CLOUD_FILES = DIR_SCRIPT + '/cloud_scripts'
 CONFIG = {}
 
-#----------------------------------------------------------
-# Tools
-#----------------------------------------------------------
+ODOO_USER = os.environ.get('ODOO_USER', 'odoo')
+if not re.match(r'^[a-z_]+$', ODOO_USER):
+    abort('%r is not alphabetical' % (ODOO_USER,))
+
+ODOO_DIR_HOME = '/home/%s' % ODOO_USER
+ODOO_DIR_SRC = ODOO_DIR_HOME + '/src'
+ODOO_DEFAULT_VERSION = '11.0'
+# those github repo should be versionned as the odoo community repo (same branch nickname)
+ODOO_REPO_DIR_MAP = {
+    'odoo': 'https://github.com/odoo/odoo.git',
+    #'jejemaes': 'https://github.com/jejemaes/jejemaes-server.git',
+}
+
+# ----------------------------------------------------------
+# Script Tools
+# ----------------------------------------------------------
+
 
 def as_(user):
     def deco(fun):
@@ -61,21 +79,98 @@ def _get_config(section_prefix):
             result[option] = CONFIG.get(option)
     return result
 
-#----------------------------------------------------------
-# Setup:
-# These methods should install only what is required to make
-# the cloud_tools works. Simply install base packages and
-# checkout the tools code to execute it.
-#----------------------------------------------------------
+# ----------------------------------------------------------
+# Git Utils
+# ----------------------------------------------------------
 
+
+def git_clone(path, gh_url, directory, branch_name=False):
+    """ Clone a github repo into a given directory
+        :param path: absotute path of the directory in which create the new repo
+        :param gh_url: HTTPS github url of the repo to clone (e.i.: https://github.com/jejemaes/jejemaes-server.git)
+        :param directory: name of directory that will contain the code
+        :param branch_name: branche name (in github repo). If given, this will fecth only this branch. Otherwise, only the
+            primary of the github repo will be fetched.
+    """
+    with cd(path):
+        if not fabtools.files.is_dir(directory):
+            if branch_name:
+                run('git clone -q --branch {0} --single-branch {1} {2}'.format(branch_name, gh_url, directory))
+            else:
+                run('git clone -q --single-branch {0} {1}'.format(gh_url, directory))
+        return True
+    return False
+
+
+def git_update_directory(path):
+    """ Update code from git for the given git directory
+        :param path: absolute path of the git directory to update
+    """
+    if not fabtools.files.is_dir(path):
+        puts(red('Setup directory {0} not found'.format(path)))
+        return
+
+    puts(blue('Update setup directory {0}'.format(path)))
+    with cd(path):
+        sudo('git fetch --quiet --prune')
+        sudo('git rebase --quiet --autostash')
+        with hide('status', 'commands'):
+            no_conflicts = sudo('git diff --diff-filter=U --no-patch --exit-code').succeeded
+    puts(blue('Update done !'))
+    return no_conflicts
+
+
+# ----------------------------------------------------------
+# Deployment / Setup
+# ----------------------------------------------------------
+
+@task
 @as_('root')
-def _setup_packages():
+def deploy(server=False):
+    _setup_common_packages()
+    _setup_server_scripts()
+
+    # Odoo Server Deploy
+    if not server or server == 'odoo':
+        deploy_odoo()
+    # LEMP Server Deploy
+    if not server or server == 'lemp':
+        deploy_lemp()
+
+
+@task
+def deploy_lemp():
+    pass
+
+
+@task
+def deploy_odoo():
+    """ Setup or update packages, services and odoo code"""
+    _setup_odoo_packages()
+    fabtools.require.service.stopped('postgresql')
+    _setup_odoo_user()
+    _setup_odoo_sources()
+    _setup_odoo_postgres()
+    fabtools.require.service.restarted('postgresql')
+
+
+def caca():
+    setup_services()
+    #setup_locales()
+    #setup_metabase()
+    #setup_munin()
+    #update_geoip(restart_openerp=False)
+    service_reload(setup=True)
+
+
+def _setup_common_packages():
     """ Method to install common packages """
     debs = """
 debconf-utils
 git
 htop
 jq
+nginx
 python-pip
 rsync
 vim
@@ -95,8 +190,7 @@ suds
     fabtools.python.install(python_pip, upgrade=True)
 
 
-@as_('root')
-def _setup_scripts():
+def _setup_server_scripts():
     """ Checkout the scripts and setup the /root/src directory """
     # checkout or pull
     sudo('mkdir -p ' + DIR_SCRIPT)
@@ -104,37 +198,195 @@ def _setup_scripts():
         if not fabtools.files.is_dir('setup'):
             sudo('git clone https://github.com/jejemaes/jejemaes-server.git setup')
         else:
-            setup_update()
+            git_update_directory(DIR_SCRIPT)
+
+
+def _setup_rsync_files(server=False):
+    """ Synchronize files from the setup repo to the real server configuration, in order to set services, ... as it should be. """
+    sudo('rsync -rtlE %s/etc/nginx/nginx.conf /etc/nginx/nginx.conf' % (DIR_CLOUD_FILES,))
+    if not server or server == 'odoo':
+        sudo("find /etc/postgresql -name 'postgresql.local.conf' -type l -delete")
+        sudo("find /etc/postgresql -name 'main' -type d -exec touch '{}/postgresql.local.conf' ';' -exec chown postgres:postgres '{}/postgresql.local.conf' ';'")
+
+        sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
+
+
+@as_('root')
+def _setup_odoo_packages():
+    """ Install/Update debian and python packages needed for Odoo Server """
+    codename = sudo('lsb_release -cs').strip()
+    uninstall = """mlocate xinetd locate wkhtmltopdf whoopsie""".split()
+    # local packages repo
+    sio = io.BytesIO(b"deb http://nightly.openerp.com/deb/%s ./" % codename)
+    put(sio, '/etc/apt/sources.list.d/odoo.list')
+
+    sio = io.BytesIO(b"Package: nginx\nPin: origin nightly.openerp.com\nPin-Priority: 1001")
+    put(sio, '/etc/apt/preferences.d/odoo')
+
+    run('add-apt-repository -y ppa:maxmind/ppa')    # for geoipupdate
+
+    base_debs = """
+curl
+fabric
+file
+geoipupdate
+git
+graphviz
+htop
+jq
+less
+libdbd-pg-perl
+libev-dev
+libevent-dev
+libfreetype6-dev
+libjpeg8-dev
+libpq-dev
+libsasl2-dev
+libtiff-dev
+libwww-perl
+libxml2-dev
+libxslt1-dev
+lsb-release
+lsof
+make
+mosh
+ncdu
+npm
+p7zip-full
+pg-activity
+postgresql
+postgresql-contrib
+rsync
+sudo
+tree
+unzip
+uptimed
+vim
+wkhtmltox
+zip
+""".split()
+    fabtools.deb.uninstall(uninstall, purge=True, options=['--quiet'])
+    fabtools.deb.update_index()
+    run("apt-get upgrade -y --force-yes")
+
+    p3_debs = """
+        python3-dev
+        python3-babel
+        python3-dateutil
+        python3-decorator
+        python3-docopt
+        python3-docutils
+        python3-feedparser
+        python3-geoip
+        python3-gevent
+        python3-html2text
+        python3-jinja2
+        python3-lxml
+        python3-mako
+        python3-markdown
+        python3-matplotlib
+        python3-mock
+        python3-ofxparse
+        python3-openid
+        python3-passlib
+        python3-pil
+        python3-pip
+        python3-psutil
+        python3-psycopg2
+        python3-pydot
+        python3-pyparsing
+        python3-pypdf2
+        python3-reportlab
+        python3-requests
+        python3-setproctitle
+        python3-simplejson
+        python3-tz
+        python3-unittest2
+        python3-vatnumber
+        python3-werkzeug
+        python3-xlrd
+        python3-xlsxwriter
+        python3-yaml
+    """.split()
+
+    p3_pips = """
+        fabtools
+        geoip2
+        num2words==0.5.4
+        phonenumbers
+        psycogreen
+        python-slugify
+        suds-jurko
+        vobject
+        xlwt
+    """.split()
+
+    debs = base_debs + p3_debs
+    fabtools.deb.install(debs, options=['--force-yes', '--ignore-missing'])
+
+    # NOTE libevent-dev is required by gevent. /!\ version 1.0 of gevent will require libev-dev (and cython)
+    # run('pip install cython -e git://github.com/surfly/gevent.git@1.0rc2#egg=gevent')
+
+    # fabtools.python.install(python_pip, upgrade=False)
+    run("pip3 install -q {}".format(' '.join(p3_pips)))
+
+    # Nodejs
+    run("ln -sf /usr/bin/nodejs /usr/bin/node")
+    run("npm install -g less less-plugin-clean-css")
+
+
+def _setup_odoo_user():
+    if not fabtools.user.exists(ODOO_USER):
+        if ODOO_USER != 'odoo':
+            abort('user %r does not exists' % ODOO_USER)
+            return
+        fabtools.user.create('odoo', create_home=True, shell='/bin/bash')
+    sudo('mkdir -p {0}/log'.format(ODOO_DIR_HOME))
+    sudo('mkdir -p {0}/src'.format(ODOO_DIR_HOME))
+    sudo('mkdir -p {0}/bin'.format(ODOO_DIR_HOME))
+
+    sudo("chown -R {0}:{0} {1}/log".format(ODOO_USER, ODOO_DIR_HOME))
+    sudo("chown -R {0}:{0} {1}/src".format(ODOO_USER, ODOO_DIR_HOME))
+    sudo("chown -R {0}:{0} {1}/bin".format(ODOO_USER, ODOO_DIR_HOME))
+
+
+def _setup_odoo_sources(version=False):
+    if not version:
+        version = ODOO_DEFAULT_VERSION
+
+    for directory, repo_url in ODOO_REPO_DIR_MAP.items():
+        current_path = ODOO_DIR_SRC + '/' + directory + '/'
+        if not fabtools.files.is_dir(current_path):
+            sudo('mkdir -p {0}'.format(current_path))
+        result = git_clone(current_path, repo_url, version, version)
+        if result:
+            run("chown -R {0}:{0} {1}".format(ODOO_USER, current_path))
 
 
 @task
-@as_('root')
-def setup():
-    _setup_packages()
-    _setup_scripts()
+def setup_odoo_services():
+    _setup_rsync_files('odoo')
+    if not fabtools.systemd.is_running('nginx'):
+        fabtools.systemd.start('nginx')
+    fabtools.systemd.enable('nginx')
 
 
-@task
-@as_('root')
-def setup_update():
-    """ Update the cloud tools code """
-    path = DIR_SCRIPT + 'setup'
-    if not fabtools.files.is_dir(path):
-        puts(red('Setup directory {0} not found'.format(path)))
+def _setup_odoo_postgres(version='9.5'):
+    datadir = '/home/postgres/%s/main' % version
+    if fabtools.files.is_dir(datadir):
         return
+    fabtools.require.directory('/home/postgres/%s/main' % version)
+    run('chown -R postgres:postgres /home/postgres')
+    sudo('/usr/lib/postgresql/%s/bin/initdb --locale=en_US.UTF-8 --lc-collate=C %s' % (version, datadir), user='postgres')
+    fabtools.service.start('postgresql')
+    sudo('''psql -c "CREATE USER root WITH SUPERUSER PASSWORD 'root' "''', user='postgres')
+    sudo('''psql -c "CREATE USER odoo WITH LOGIN PASSWORD 'odoo' "''', user='postgres')
 
-    puts(blue('Update setup directory {0}'.format(path)))
-    with cd(path):
-        sudo('git fetch --quiet --prune')
-        sudo('git rebase --quiet --autostash')
-        with hide('status', 'commands'):
-            no_conflicts = sudo('git diff --diff-filter=U --no-patch --exit-code').succeeded
-    puts(blue('Update done !'))
-    return no_conflicts
 
-#----------------------------------------------------------
+# ----------------------------------------------------------
 # LEMP server
-#----------------------------------------------------------
+# ----------------------------------------------------------
+
 
 @task
 @as_('root')
@@ -187,3 +439,7 @@ def lemp_create_account(domain, user, password):
     puts(fabtools.mysql.query(query))
     query = """INSERT IGNORE INTO meta.ftpuser (userid, passwd, uid, gid, homedir, shell, count, accessed, modified) VALUES ("%s", "%s", %s, %s, "%s", "/sbin/nologin", 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);""" % (user, password, unix_user_id, unix_group_id, home_dir)
     puts(fabtools.mysql.query(query))
+
+# ----------------------------------------------------------
+# Odoo Server
+# ----------------------------------------------------------

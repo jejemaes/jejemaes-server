@@ -58,7 +58,6 @@ def setup_lemp_server(upgrade=False):
     log.info("Installing deb dependencies ...")
     debs_to_install = """
         mysql-server-5.7
-        nginx
         php-imagick
         php7.0
         php7.0-common
