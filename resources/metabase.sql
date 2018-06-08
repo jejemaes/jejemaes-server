@@ -17,6 +17,13 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+CREATE TABLE IF NOT EXISTS odoo_version(
+    id serial PRIMARY KEY,
+    version varchar NOT NULL,
+    port integer,
+    longpolling_port integer
+);
+
 CREATE TABLE IF NOT EXISTS service_account(
     id serial PRIMARY KEY,
     name varchar NOT NULL UNIQUE,
@@ -27,7 +34,7 @@ CREATE TABLE IF NOT EXISTS service_account(
     service_type service_type_type NOT NULL DEFAULT 'lemp',
     create_date timestamp without time zone DEFAULT NOW(),
     update_date timestamp without time zone DEFAULT NOW(),
-    port integer
+    odoo_version_id integer REFERENCES odoo_version(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS database(
@@ -37,5 +44,9 @@ CREATE TABLE IF NOT EXISTS database(
     service_id integer NOT NULL REFERENCES service_account(id) ON DELETE CASCADE
 );
 
+
 DROP INDEX IF EXISTS databases_name_per_type_uniq;
 CREATE UNIQUE INDEX databases_name_per_type_uniq ON database(name, db_type);
+
+ALTER TABLE service_account DROP CONSTRAINT IF EXISTS version_required_for_odoo;
+ALTER TABLE service_account ADD CONSTRAINT version_required_for_odoo CHECK((service_type='odoo' AND odoo_version_id IS NOT NULL) or (service_type!='odoo'));
