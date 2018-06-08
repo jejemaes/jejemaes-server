@@ -9,6 +9,7 @@ from fabric.api import task, env, run, cd, sudo, put, hide, hosts, local, get, e
 from fabric.colors import red, yellow, green, blue, white
 from fabric.utils import abort, puts, fastprint, warn
 from fabric.context_managers import warn_only, settings, shell_env
+from fabric.contrib.files import exists, upload_template
 
 import fabtools
 import fabtools.require
@@ -17,6 +18,8 @@ from functools import wraps
 
 
 HERE = os.path.dirname(os.path.realpath(__file__))
+LOCAL_DIR_RESOURCES = HERE + '/resources/'
+
 DIR_SCRIPT = '/root/cloud/'
 DIR_CLOUD_FILES = DIR_SCRIPT + '/cloud_scripts'
 SERV_DIR_RESOURCES = '/root/cloud/setup/resources/'
@@ -80,6 +83,13 @@ def _get_config(section_prefix):
         if option.startswith(section_prefix):
             result[option] = CONFIG.get(option)
     return result
+
+
+def has_systemd():
+    with hide('output', 'running', 'warnings'):
+        with settings(warn_only=True):
+            res = run('command -v systemctl')
+            return res.return_code == 0
 
 
 # fabtools issue: https://github.com/fabtools/fabtools/issues/4
@@ -226,7 +236,8 @@ def _setup_rsync_files(server=False):
     sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
 
     if not server or server == 'odoo':
-        pass
+        run('rsync -rtlE %s/etc/sudoers.d/ /etc/sudoers.d/' % (DIR_CLOUD_FILES,))
+        run('chmod 440 /etc/sudoers.d/*')
 
 
 def _setup_postgres(version='9.5'):
@@ -413,6 +424,40 @@ def setup_odoo_services():  #TODO JEM: not sure this is usefull
     if not fabtools.systemd.is_running('nginx'):
         fabtools.systemd.start('nginx')
     fabtools.systemd.enable('nginx')
+
+
+def _setup_odoo_branch2service(branch):
+    """returns a tuple (service_name, service_path)"""
+    service_name = 'openerp-' + branch
+    if has_systemd():
+        service_path = '/etc/systemd/system/{0}.service'.format(service_name)
+    else:
+        service_path = '/etc/init.d/{0}'.format(service_name)
+    return (service_name, service_path)
+
+
+@as_('root')
+def _setup_odoo_initd(branch):
+    ctx = {
+        'branch': branch
+    }
+
+    sudo('ln -sf {0}/bin/openerp {0}/bin/openerp-{1}'.format(ODOO_DIR_HOME, branch))
+
+    def _upload_template(template, target, mode):
+        upload_template(os.path.join(LOCAL_DIR_RESOURCES, template), target, ctx, backup=False, mode=mode)
+
+    service_name, service_path = _setup_odoo_branch2service(branch)
+    if has_systemd():
+        # systemd
+        _upload_template('unit_openerp.tpl', service_path, '0644')
+        run('systemctl daemon-reload')
+        fabtools.systemd.enable(service_name)
+    else:
+        # SysV init
+        _upload_template('initd_openerp.tpl', service_path, '0755')
+        run('update-rc.d {0} defaults'.format(service_name))
+
 
 
 # ----------------------------------------------------------

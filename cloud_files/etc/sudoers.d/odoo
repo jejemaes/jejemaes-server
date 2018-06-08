@@ -1,0 +1,5 @@
+odoo	ALL=(ALL) NOPASSWD: /home/odoo/src/custom/setup/setup.sh
+odoo	ALL=(ALL) NOPASSWD: /etc/init.d/openerp*
+odoo	ALL=(ALL) NOPASSWD: /bin/hostname
+odoo	ALL=(ALL) NOPASSWD: /usr/sbin/nginx
+odoo	ALL=(ALL) NOPASSWD: /root/bin/setup_replication.sh
