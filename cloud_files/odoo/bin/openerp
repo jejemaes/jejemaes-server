@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+ME=`basename $0`
+PREFIX=${ME:0:8}
+if [ $PREFIX != "openerp-" ]; then
+    echo "Invalid prefix: $PREFIX. expected 'openerp-'" >&2
+    exit 1;
+fi;
+
+BRANCH=${ME:8}
+if [ -z $BRANCH ]; then
+    echo "Must end with branch nick" >&2
+    exit 1;
+fi;
+
+_min() {
+    echo $[$1>$2?$2:$1]
+}
+_max() {
+    echo $[$1<$2?$2:$1]
+}
+
+source `dirname $0`/addons-path.sh $BRANCH
+
+SRCROOT=$HOME/src/odoo/$BRANCH
+
+RUNNING_SERIES=$[$($HOME/bin/oe-meta list-branches | wc -l) + 1]     # add ourself
+
+# Workers = nbr of processor +1, with a minimum of 6 and
+# a maximum of 12 as it can trigger bugs in the kernel scheduler
+# when we have 1000+ processes, and each worker can create
+# db_maxconn PG worker processes.
+CPU_COUNT=$(grep -c processor /proc/cpuinfo)
+# 6 worker min, 12 workers max
+WORKERS=$(_min $(_max 6 $[CPU_COUNT / 2 + 1]) 12)
+# Only one cron we report failing jobs in +10 rounds
+CRONS=1
+
+if [ -z $OE_PORT ]; then
+    OE_PORT=$($HOME/bin/oe-meta get-port $BRANCH)
+fi
+LONGPOLLPORT=$((OE_PORT + (OE_PORT > 10000 ? 1000 : 3)))
+
+OPTIONS="--unaccent --db_maxconn=32 --no-database-list --xmlrpc-interface=127.0.0.1 --xmlrpc-port=$OE_PORT --proxy-mode --logfile=$HOME/log/openerp-${BRANCH}.log --db-filter=^(%d|saas_master|openerp)\$"
+
+if [ $BRANCH != "7.0" ]; then
+    OPTIONS="$OPTIONS --longpolling-port=$LONGPOLLPORT --load=$WORKER_ADDONS"
+else
+    OPTIONS="$OPTIONS --no-netrpc --no-logrotate"
+fi;
+
+GEOIP_DB='/usr/share/GeoIP/GeoLite2-City.mmdb'
+
+if [[ -f $GEOIP_DB ]]; then
+    OPTIONS="$OPTIONS --geoip-db=$GEOIP_DB"
+fi;
+
+MEMORY_SLOTS=$[$RUNNING_SERIES + 1]     # keep some memory for postgres
+TOTAL_MEMORY=$(free -b |  grep Mem | awk '{print $2}')
+
+MEM_SOFT=$[$TOTAL_MEMORY / $MEMORY_SLOTS / ($WORKERS+1)]    # count gevent worker
+MEM_HARD=$[$MEM_SOFT + 1*1024*1024*1024]    # 1GB more for the hard limit
+
+CPU_REAL=2700       # downloading a 3GB database backup take a long time...
+CPU_TIME=900
+
+# let enough time to create a demo database it currenlty take around 6min, 20min should be enough for everyone
+OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS --limit-memory-soft=$MEM_SOFT --limit-memory-hard=$MEM_HARD --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
+
+[ -f $HOME/config/openerp.sh ] && source $HOME/config/openerp.sh
+[ -f $HOME/config/openerp-${BRANCH}.sh ] && source $HOME/config/openerp-${BRANCH}.sh
+
+if [ "$OE_SMTP" != "mailcatcher" ]; then
+    OPTIONS="$OPTIONS --smtp=${OE_SMTP:-mailsaas1.odoo.com} --smtp-port=2525 --smtp-ssl --smtp-user=odoo --smtp-password=tinies07"
+else
+    OPTIONS="$OPTIONS --smtp=localhost --smtp-port=1025"
+fi;
+
+# NOTE: DO NOT use new cli syntax as it has nasty side effect when importing all modules
+# in non-topological order. As saas-dump dir is not cleared at module load since a few months,
+# this hack is not needed anymore.
+
+if [[ "$1" == "shell" ]]; then
+    shift
+    OPTIONS="shell $OPTIONS --no-xmlrpc --logfile="
+fi;
+
+BIN=$SRCROOT/openerp-server
+if [[ ! -f $BIN ]]; then
+    BIN=$SRCROOT/odoo-bin
+fi;
+
+exec $BIN --addons-path=${ADDONS} $OPTIONS "$@"

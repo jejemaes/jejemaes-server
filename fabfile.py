@@ -22,7 +22,9 @@ LOCAL_DIR_RESOURCES = HERE + '/resources/'
 
 DIR_SCRIPT = '/root/cloud/'
 DIR_CLOUD_FILES = DIR_SCRIPT + '/cloud_scripts'
+SERV_DIR_CLOUD_SETUP = '/root/cloud/setup/'
 SERV_DIR_RESOURCES = '/root/cloud/setup/resources/'
+SERV_DIR_FILES = '/root/cloud/setup/cloud_files/'
 CONFIG = {}
 
 ODOO_USER = os.environ.get('ODOO_USER', 'odoo')
@@ -144,7 +146,7 @@ def git_update_directory(path):
 
 
 # ----------------------------------------------------------
-# Deployment / Setup
+# Deployment / Setup for Odoo and LEMP server
 # ----------------------------------------------------------
 @task
 @as_('root')
@@ -160,30 +162,22 @@ def deploy(server=False):
 
     _setup_server_scripts()
 
+    # Odoo Server Deploy
+    if not server or server == 'odoo':
+        _setup_odoo_packages()
+        _setup_odoo_user()
+    # LEMP Server Deploy
+    if not server or server == 'lemp':
+        _setup_lemp_server()
+
+    _setup_rsync_files(server)
+
     if not server:
         fabtools.require.service.stopped('postgresql')
         _setup_postgres()
         fabtools.require.service.restarted('postgresql')
 
     setup_metabase()
-
-    # Odoo Server Deploy
-    if not server or server == 'odoo':
-        deploy_odoo()
-    # LEMP Server Deploy
-    if not server or server == 'lemp':
-        deploy_lemp()
-
-
-def deploy_lemp():
-    pass
-
-
-def deploy_odoo():
-    """ Setup or update packages, services and odoo code"""
-    _setup_odoo_packages()
-    _setup_odoo_user()
-    _setup_odoo_sources()
 
 
 def _setup_common_packages():
@@ -405,19 +399,6 @@ def _setup_odoo_user():
     sudo("chown -R {0}:{0} {1}/bin".format(ODOO_USER, ODOO_DIR_HOME))
 
 
-def _setup_odoo_sources(version=False):
-    if not version:
-        version = ODOO_DEFAULT_VERSION
-
-    for directory, repo_url in ODOO_REPO_DIR_MAP.items():
-        current_path = ODOO_DIR_SRC + '/' + directory + '/'
-        if not fabtools.files.is_dir(current_path):
-            sudo('mkdir -p {0}'.format(current_path))
-        result = git_clone(current_path, repo_url, version, version)
-        if result:
-            run("chown -R {0}:{0} {1}".format(ODOO_USER, current_path))
-
-
 @task
 def setup_odoo_services():  #TODO JEM: not sure this is usefull
     _setup_rsync_files('odoo')
@@ -426,48 +407,12 @@ def setup_odoo_services():  #TODO JEM: not sure this is usefull
     fabtools.systemd.enable('nginx')
 
 
-def _setup_odoo_branch2service(branch):
-    """returns a tuple (service_name, service_path)"""
-    service_name = 'openerp-' + branch
-    if has_systemd():
-        service_path = '/etc/systemd/system/{0}.service'.format(service_name)
-    else:
-        service_path = '/etc/init.d/{0}'.format(service_name)
-    return (service_name, service_path)
-
-
-@as_('root')
-def _setup_odoo_initd(branch):
-    ctx = {
-        'branch': branch
-    }
-
-    sudo('ln -sf {0}/bin/openerp {0}/bin/openerp-{1}'.format(ODOO_DIR_HOME, branch))
-
-    def _upload_template(template, target, mode):
-        upload_template(os.path.join(LOCAL_DIR_RESOURCES, template), target, ctx, backup=False, mode=mode)
-
-    service_name, service_path = _setup_odoo_branch2service(branch)
-    if has_systemd():
-        # systemd
-        _upload_template('unit_openerp.tpl', service_path, '0644')
-        run('systemctl daemon-reload')
-        fabtools.systemd.enable(service_name)
-    else:
-        # SysV init
-        _upload_template('initd_openerp.tpl', service_path, '0755')
-        run('update-rc.d {0} defaults'.format(service_name))
-
-
-
 # ----------------------------------------------------------
 # LEMP server
 # ----------------------------------------------------------
 
-
-@task
 @as_('root')
-def setup_lemp_server():
+def _setup_lemp_server():
     with cd('/root/cloud/setup'):
         sudo('./cloud-setup lemp setup -v')
 
@@ -520,3 +465,66 @@ def lemp_create_account(domain, user, password):
 # ----------------------------------------------------------
 # Odoo Server
 # ----------------------------------------------------------
+
+
+@task
+def deploy_odoo(branch_nick=False):
+    """ Deploy a version of Odoo on the server:
+            - fetch sources
+            - create service
+            - ...
+    """
+    if not branch_nick:
+        branch_nick = ODOO_DEFAULT_VERSION
+
+    _odoo_fetch_sources(branch_nick)
+    _odoo_create_initd(branch_nick)
+
+
+def _odoo_fetch_sources(branch_nick):
+    """ Fetch source in src/<version> or update sources """
+    for directory, repo_url in ODOO_REPO_DIR_MAP.items():
+        current_path = ODOO_DIR_SRC + '/' + directory + '/'
+        if fabtools.files.is_dir(current_path):
+            git_update_directory(current_path)
+        else:
+            sudo('mkdir -p {0}'.format(current_path))
+            result = git_clone(current_path, repo_url, branch_nick, branch_nick)
+            if result:
+                puts(blue('Odoo %s sources fetched !' % (branch_nick,)))
+            else:
+                puts(red('Error when fetching Odoo %s sources !' % (branch_nick,)))
+        run("chown -R {0}:{0} {1}".format(ODOO_USER, current_path))
+
+
+def _odoo_branch2service(branch):
+    """returns a tuple (service_name, service_path)"""
+    service_name = 'openerp-' + branch
+    if has_systemd():
+        service_path = '/etc/systemd/system/{0}.service'.format(service_name)
+    else:
+        service_path = '/etc/init.d/{0}'.format(service_name)
+    return (service_name, service_path)
+
+
+@as_('root')
+def _odoo_create_initd(branch):
+    ctx = {
+        'branch': branch
+    }
+
+    sudo('ln -sf {0}/bin/openerp {0}/bin/openerp-{1}'.format(ODOO_DIR_HOME, branch))
+
+    def _upload_template(template, target, mode):
+        upload_template(os.path.join(LOCAL_DIR_RESOURCES, template), target, ctx, backup=False, mode=mode)
+
+    service_name, service_path = _odoo_branch2service(branch)
+    if has_systemd():
+        # systemd
+        _upload_template('unit_openerp.tpl', service_path, '0644')
+        run('systemctl daemon-reload')
+        fabtools.systemd.enable(service_name)
+    else:
+        # SysV init
+        _upload_template('initd_openerp.tpl', service_path, '0755')
+        run('update-rc.d {0} defaults'.format(service_name))
