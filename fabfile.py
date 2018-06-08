@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 import ConfigParser
 import io
 import os
@@ -7,7 +8,7 @@ import re
 from fabric.api import task, env, run, cd, sudo, put, hide, hosts, local, get, execute
 from fabric.colors import red, yellow, green, blue, white
 from fabric.utils import abort, puts, fastprint, warn
-
+from fabric.context_managers import warn_only, settings, shell_env
 
 import fabtools
 import fabtools.require
@@ -18,6 +19,7 @@ from functools import wraps
 HERE = os.path.dirname(os.path.realpath(__file__))
 DIR_SCRIPT = '/root/cloud/'
 DIR_CLOUD_FILES = DIR_SCRIPT + '/cloud_scripts'
+SERV_DIR_RESOURCES = '/root/cloud/setup/resources/'
 CONFIG = {}
 
 ODOO_USER = os.environ.get('ODOO_USER', 'odoo')
@@ -79,6 +81,17 @@ def _get_config(section_prefix):
             result[option] = CONFIG.get(option)
     return result
 
+
+# fabtools issue: https://github.com/fabtools/fabtools/issues/4
+# checking the existance of a user will always return True as a warning
+# "/bin/bash: /root/.bash_profile: Permission denied\r\ncould not
+# change directory to "/root" is returned, and is evaluated to True.
+# This method patch it.
+def pg_user_exists(name):
+    with settings(hide('running', 'stdout', 'stderr', 'warnings'), warn_only=True):
+        res = fabtools.postgres._run_as_pg('''psql -t -A -c "SELECT count(*) FROM pg_user WHERE usename='%(name)s';"''' % locals())
+    return '1' in res
+
 # ----------------------------------------------------------
 # Git Utils
 # ----------------------------------------------------------
@@ -116,19 +129,33 @@ def git_update_directory(path):
         sudo('git rebase --quiet --autostash')
         with hide('status', 'commands'):
             no_conflicts = sudo('git diff --diff-filter=U --no-patch --exit-code').succeeded
-    puts(blue('Update done !'))
+    puts(blue('Update of cloud scripts done !'))
     return no_conflicts
 
 
 # ----------------------------------------------------------
 # Deployment / Setup
 # ----------------------------------------------------------
+@task
+@as_('root')
+def test():
+    setup_metabase()
+
 
 @task
 @as_('root')
 def deploy(server=False):
-    _setup_common_packages()
+    if not server:
+        _setup_common_packages()
+
     _setup_server_scripts()
+
+    if not server:
+        fabtools.require.service.stopped('postgresql')
+        _setup_postgres()
+        fabtools.require.service.restarted('postgresql')
+
+    setup_metabase()
 
     # Odoo Server Deploy
     if not server or server == 'odoo':
@@ -138,29 +165,15 @@ def deploy(server=False):
         deploy_lemp()
 
 
-@task
 def deploy_lemp():
     pass
 
 
-@task
 def deploy_odoo():
     """ Setup or update packages, services and odoo code"""
     _setup_odoo_packages()
-    fabtools.require.service.stopped('postgresql')
     _setup_odoo_user()
     _setup_odoo_sources()
-    _setup_odoo_postgres()
-    fabtools.require.service.restarted('postgresql')
-
-
-def caca():
-    setup_services()
-    #setup_locales()
-    #setup_metabase()
-    #setup_munin()
-    #update_geoip(restart_openerp=False)
-    service_reload(setup=True)
 
 
 def _setup_common_packages():
@@ -172,6 +185,8 @@ htop
 jq
 nginx
 python-pip
+postgresql
+postgresql-contrib
 rsync
 vim
 """.split()
@@ -198,17 +213,48 @@ def _setup_server_scripts():
         if not fabtools.files.is_dir('setup'):
             sudo('git clone https://github.com/jejemaes/jejemaes-server.git setup')
         else:
-            git_update_directory(DIR_SCRIPT)
+            git_update_directory(DIR_SCRIPT + 'setup')
 
 
 def _setup_rsync_files(server=False):
     """ Synchronize files from the setup repo to the real server configuration, in order to set services, ... as it should be. """
+    # nginx config
     sudo('rsync -rtlE %s/etc/nginx/nginx.conf /etc/nginx/nginx.conf' % (DIR_CLOUD_FILES,))
-    if not server or server == 'odoo':
-        sudo("find /etc/postgresql -name 'postgresql.local.conf' -type l -delete")
-        sudo("find /etc/postgresql -name 'main' -type d -exec touch '{}/postgresql.local.conf' ';' -exec chown postgres:postgres '{}/postgresql.local.conf' ';'")
+    # postgres config
+    sudo("find /etc/postgresql -name 'postgresql.local.conf' -type l -delete")
+    sudo("find /etc/postgresql -name 'main' -type d -exec touch '{}/postgresql.local.conf' ';' -exec chown postgres:postgres '{}/postgresql.local.conf' ';'")
+    sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
 
-        sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
+    if not server or server == 'odoo':
+        pass
+
+
+def _setup_postgres(version='9.5'):
+    """ Setup postgres databse user and root and odoo roles """
+    datadir = '/home/postgres/%s/main' % version
+    if not fabtools.files.is_dir(datadir):
+        fabtools.require.directory('/home/postgres/%s/main' % version)
+        run('chown -R postgres:postgres /home/postgres')
+        sudo('/usr/lib/postgresql/%s/bin/initdb --locale=en_US.UTF-8 --lc-collate=C %s' % (version, datadir), user='postgres')
+    fabtools.service.start('postgresql')
+
+    if not pg_user_exists('root'):
+        fabtools.postgres.create_user('root', 'root', superuser=True)
+    if not pg_user_exists('odoo'):
+        fabtools.postgres.create_user('odoo', 'odoo', superuser=True)
+
+
+@task
+@as_('root')
+def setup_metabase():
+    """ Create or update schema of `meta` database. Only root should access it since this is the cloud user. """
+    META = 'meta'
+    with settings(sudo_user=env.user):
+        if not fabtools.postgres.database_exists(META):
+            fabtools.postgres.create_database(META, owner='root')
+
+    with shell_env(PGOPTIONS='--client-min-messages=warning'):
+        sudo('psql -Xq -d {0} -f {1}metabase.sql'.format(META, SERV_DIR_RESOURCES))
 
 
 @as_('root')
@@ -254,8 +300,6 @@ ncdu
 npm
 p7zip-full
 pg-activity
-postgresql
-postgresql-contrib
 rsync
 sudo
 tree
@@ -364,23 +408,11 @@ def _setup_odoo_sources(version=False):
 
 
 @task
-def setup_odoo_services():
+def setup_odoo_services():  #TODO JEM: not sure this is usefull
     _setup_rsync_files('odoo')
     if not fabtools.systemd.is_running('nginx'):
         fabtools.systemd.start('nginx')
     fabtools.systemd.enable('nginx')
-
-
-def _setup_odoo_postgres(version='9.5'):
-    datadir = '/home/postgres/%s/main' % version
-    if fabtools.files.is_dir(datadir):
-        return
-    fabtools.require.directory('/home/postgres/%s/main' % version)
-    run('chown -R postgres:postgres /home/postgres')
-    sudo('/usr/lib/postgresql/%s/bin/initdb --locale=en_US.UTF-8 --lc-collate=C %s' % (version, datadir), user='postgres')
-    fabtools.service.start('postgresql')
-    sudo('''psql -c "CREATE USER root WITH SUPERUSER PASSWORD 'root' "''', user='postgres')
-    sudo('''psql -c "CREATE USER odoo WITH LOGIN PASSWORD 'odoo' "''', user='postgres')
 
 
 # ----------------------------------------------------------
