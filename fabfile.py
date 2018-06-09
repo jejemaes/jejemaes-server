@@ -229,6 +229,9 @@ def _setup_rsync_files(server=False):
     sudo("find /etc/postgresql -name 'postgresql.local.conf' -type l -delete")
     sudo("find /etc/postgresql -name 'main' -type d -exec touch '{}/postgresql.local.conf' ';' -exec chown postgres:postgres '{}/postgresql.local.conf' ';'")
     sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
+    # make cloud meta tool executable
+    sudo("mkdir -p %s/log" % (SERV_DIR_CLOUD_SETUP,))
+    sudo("chmod 775 %s/cloud-meta" % (SERV_DIR_CLOUD_SETUP,))
 
     if not server or server == 'odoo':
         run('rsync -rtlE %s/etc/sudoers.d/ /etc/sudoers.d/' % (DIR_CLOUD_FILES,))

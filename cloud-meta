@@ -1,0 +1,5 @@
+#!/bin/bash
+script_file=`readlink -f ${BASH_SOURCE[0]}`
+project_dir=$( cd "$( dirname "$script_file" )" && pwd )
+cd $project_dir
+exec python cloud_meta.py $@
