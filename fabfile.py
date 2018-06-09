@@ -234,6 +234,9 @@ def _setup_rsync_files(server=False):
     sudo("chmod 775 %s/cloud-meta" % (SERV_DIR_CLOUD_SETUP,))
 
     if not server or server == 'odoo':
+        run('rsync -rtlE %s/odoo/ %s' % (SERV_DIR_CLOUD_FILES, ODOO_DIR_HOME))
+        sudo("chown -R {0}:{0} {1}/bin".format(ODOO_USER, ODOO_DIR_HOME))
+
         run('rsync -rtlE %s/etc/sudoers.d/ /etc/sudoers.d/' % (SERV_DIR_CLOUD_FILES,))
         run('chmod 440 /etc/sudoers.d/*')
 
