@@ -20,11 +20,11 @@ from functools import wraps
 HERE = os.path.dirname(os.path.realpath(__file__))
 LOCAL_DIR_RESOURCES = HERE + '/resources/'
 
-DIR_SCRIPT = '/root/cloud/'
-DIR_CLOUD_FILES = DIR_SCRIPT + '/cloud_scripts'
-SERV_DIR_CLOUD_SETUP = '/root/cloud/setup/'
-SERV_DIR_RESOURCES = '/root/cloud/setup/resources/'
-SERV_DIR_FILES = '/root/cloud/setup/cloud_files/'
+DIR_SCRIPT = '/root/cloud'
+SERV_DIR_CLOUD_FILES = '/root/cloud/setup/cloud_files'
+SERV_DIR_CLOUD_SETUP = '/root/cloud/setup'
+SERV_DIR_RESOURCES = '/root/cloud/setup/resources'
+SERV_DIR_FILES = '/root/cloud/setup/cloud_files'
 CONFIG = {}
 
 ODOO_USER = os.environ.get('ODOO_USER', 'odoo')
@@ -224,17 +224,17 @@ def _setup_server_scripts():
 def _setup_rsync_files(server=False):
     """ Synchronize files from the setup repo to the real server configuration, in order to set services, ... as it should be. """
     # nginx config
-    sudo('rsync -rtlE %s/etc/nginx/nginx.conf /etc/nginx/nginx.conf' % (DIR_CLOUD_FILES,))
+    sudo('rsync -rtlE %s/etc/nginx/nginx.conf /etc/nginx/nginx.conf' % (SERV_DIR_CLOUD_FILES,))
     # postgres config
     sudo("find /etc/postgresql -name 'postgresql.local.conf' -type l -delete")
     sudo("find /etc/postgresql -name 'main' -type d -exec touch '{}/postgresql.local.conf' ';' -exec chown postgres:postgres '{}/postgresql.local.conf' ';'")
-    sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (DIR_CLOUD_FILES,))
+    sudo('rsync -rtlE %s/etc/postgresql /etc/postgresql' % (SERV_DIR_CLOUD_FILES,))
     # make cloud meta tool executable
     sudo("mkdir -p %s/log" % (SERV_DIR_CLOUD_SETUP,))
     sudo("chmod 775 %s/cloud-meta" % (SERV_DIR_CLOUD_SETUP,))
 
     if not server or server == 'odoo':
-        run('rsync -rtlE %s/etc/sudoers.d/ /etc/sudoers.d/' % (DIR_CLOUD_FILES,))
+        run('rsync -rtlE %s/etc/sudoers.d/ /etc/sudoers.d/' % (SERV_DIR_CLOUD_FILES,))
         run('chmod 440 /etc/sudoers.d/*')
 
 
@@ -263,7 +263,7 @@ def setup_metabase():
             fabtools.postgres.create_database(META, owner='root')
 
     with shell_env(PGOPTIONS='--client-min-messages=warning'):
-        sudo('psql -Xq -d {0} -f {1}metabase.sql'.format(META, SERV_DIR_RESOURCES))
+        sudo('psql -Xq -d {0} -f {1}/metabase.sql'.format(META, SERV_DIR_RESOURCES))
 
 
 @as_('root')
