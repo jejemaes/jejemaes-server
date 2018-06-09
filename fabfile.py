@@ -166,6 +166,7 @@ def deploy(server=False):
     if not server or server == 'odoo':
         _setup_odoo_packages()
         _setup_odoo_user()
+        run('geoipupdate')
     # LEMP Server Deploy
     if not server or server == 'lemp':
         _setup_lemp_server()
