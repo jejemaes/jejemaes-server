@@ -25,7 +25,7 @@ source `dirname $0`/addons-path.sh $BRANCH
 CLOUD_DIR=/root/cloud/setup
 SRCROOT=$HOME/src/odoo/$BRANCH
 
-RUNNING_SERIES=$[$($CLOUD_DIR/cloud-meta odoo-list-branches | wc -l) + 1]     # add ourself
+RUNNING_SERIES=$[$(sudo $CLOUD_DIR/cloud-meta odoo-list-branches | wc -l) + 1]     # add ourself
 
 # Workers = nbr of processor +1, with a minimum of 6 and
 # a maximum of 12 as it can trigger bugs in the kernel scheduler
@@ -38,10 +38,10 @@ WORKERS=$(_min $(_max 6 $[CPU_COUNT / 2 + 1]) 12)
 CRONS=1
 
 if [ -z $OE_PORT ]; then
-    OE_PORT=$($CLOUD_DIR/cloud-meta odoo-get-port $BRANCH)
+    OE_PORT=$(sudo $CLOUD_DIR/cloud-meta odoo-get-port $BRANCH)
 fi
 if [ -z $LONGPOLLPORT ]; then
-    LONGPOLLPORT=$($CLOUD_DIR/cloud-meta odoo-get-longpolling-port $BRANCH)
+    LONGPOLLPORT=$(sudo $CLOUD_DIR/cloud-meta odoo-get-longpolling-port $BRANCH)
 fi
 
 OPTIONS="--unaccent --db_maxconn=32 --no-database-list --xmlrpc-interface=127.0.0.1 --xmlrpc-port=$OE_PORT --proxy-mode --logfile=$HOME/log/openerp-${BRANCH}.log --db-filter=^(%d|saas_master|openerp)\$"
