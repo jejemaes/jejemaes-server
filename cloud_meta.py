@@ -117,12 +117,12 @@ def _odoo_get_port(branch, column_port):
     port = None
     with cursor() as cr:
         cr.execute("""
-            SELECT %s
+            SELECT %s AS port
             FROM odoo_version
             WHERE version = %%s
         """ % (column_port,), (branch,))
         data = cr.fetchall()
-        port = data[0] if data else None
+        port = data[0].port if data else None
     if not port:
         raise RuntimeError('No %s for branch %s found' % (column_port, branch,))
     return port
@@ -134,9 +134,9 @@ def odoo_list_branches():
         cr.execute("""
             SELECT version
             FROM odoo_version
-            ORDER BY name DESC
+            ORDER BY id DESC
         """)
-        version_list = [v[0] for v in cr.fetchall()]
+        version_list = [v.version for v in cr.fetchall()]
     return version_list
 
 
@@ -179,7 +179,7 @@ def main():
     opt = docopt(main.__doc__)
 
     if opt['odoo-list-branches']:
-        for branch in list_branches():
+        for branch in odoo_list_branches():
             if opt['-p']:
                 print('%s (%d)' % (branch, get_port(branch)))
             else:
@@ -189,7 +189,7 @@ def main():
     elif opt['odoo-get-port']:
         print(odoo_get_port(opt['<branch>']))
     elif opt['odoo-get-longpolling-port']:
-        print(odoo_get_longppolling_port(opt['<branch>']))
+        print(odoo_get_longpolling_port(opt['<branch>']))
     elif opt['odoo-add-version']:
         print(odoo_add_version(opt['<version>'], opt['<port>'], opt['<longpolling_port>']))
 

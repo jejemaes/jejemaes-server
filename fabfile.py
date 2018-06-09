@@ -151,7 +151,7 @@ def git_update_directory(path):
 @task
 @as_('root')
 def test():
-    setup_metabase()
+    _setup_rsync_files()
 
 
 @task
