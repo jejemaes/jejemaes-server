@@ -22,9 +22,10 @@ _max() {
 
 source `dirname $0`/addons-path.sh $BRANCH
 
+CLOUD_DIR=/root/cloud/setup
 SRCROOT=$HOME/src/odoo/$BRANCH
 
-RUNNING_SERIES=$[$($HOME/bin/oe-meta list-branches | wc -l) + 1]     # add ourself
+RUNNING_SERIES=$[$($CLOUD_DIR/cloud-meta odoo-list-branches | wc -l) + 1]     # add ourself
 
 # Workers = nbr of processor +1, with a minimum of 6 and
 # a maximum of 12 as it can trigger bugs in the kernel scheduler
@@ -37,17 +38,15 @@ WORKERS=$(_min $(_max 6 $[CPU_COUNT / 2 + 1]) 12)
 CRONS=1
 
 if [ -z $OE_PORT ]; then
-    OE_PORT=$($HOME/bin/oe-meta get-port $BRANCH)
+    OE_PORT=$($CLOUD_DIR/cloud-meta odoo-get-port $BRANCH)
 fi
-LONGPOLLPORT=$((OE_PORT + (OE_PORT > 10000 ? 1000 : 3)))
+if [ -z $LONGPOLLPORT ]; then
+    LONGPOLLPORT=$($CLOUD_DIR/cloud-meta odoo-get-longpolling-port $BRANCH)
+fi
 
 OPTIONS="--unaccent --db_maxconn=32 --no-database-list --xmlrpc-interface=127.0.0.1 --xmlrpc-port=$OE_PORT --proxy-mode --logfile=$HOME/log/openerp-${BRANCH}.log --db-filter=^(%d|saas_master|openerp)\$"
+OPTIONS="$OPTIONS --longpolling-port=$LONGPOLLPORT --load=$WORKER_ADDONS"
 
-if [ $BRANCH != "7.0" ]; then
-    OPTIONS="$OPTIONS --longpolling-port=$LONGPOLLPORT --load=$WORKER_ADDONS"
-else
-    OPTIONS="$OPTIONS --no-netrpc --no-logrotate"
-fi;
 
 GEOIP_DB='/usr/share/GeoIP/GeoLite2-City.mmdb'
 
@@ -67,14 +66,12 @@ CPU_TIME=900
 # let enough time to create a demo database it currenlty take around 6min, 20min should be enough for everyone
 OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS --limit-memory-soft=$MEM_SOFT --limit-memory-hard=$MEM_HARD --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
 
-[ -f $HOME/config/openerp.sh ] && source $HOME/config/openerp.sh
-[ -f $HOME/config/openerp-${BRANCH}.sh ] && source $HOME/config/openerp-${BRANCH}.sh
 
-if [ "$OE_SMTP" != "mailcatcher" ]; then
-    OPTIONS="$OPTIONS --smtp=${OE_SMTP:-mailsaas1.odoo.com} --smtp-port=2525 --smtp-ssl --smtp-user=odoo --smtp-password=tinies07"
-else
-    OPTIONS="$OPTIONS --smtp=localhost --smtp-port=1025"
-fi;
+#if [ "$OE_SMTP" != "mailcatcher" ]; then
+#    OPTIONS="$OPTIONS --smtp=${OE_SMTP:-mailsaas1.odoo.com} --smtp-port=2525 --smtp-ssl --smtp-user=odoo --smtp-password=tinies07"
+#else
+#    OPTIONS="$OPTIONS --smtp=localhost --smtp-port=1025"
+#fi;
 
 # NOTE: DO NOT use new cli syntax as it has nasty side effect when importing all modules
 # in non-topological order. As saas-dump dir is not cleared at module load since a few months,
@@ -85,9 +82,6 @@ if [[ "$1" == "shell" ]]; then
     OPTIONS="shell $OPTIONS --no-xmlrpc --logfile="
 fi;
 
-BIN=$SRCROOT/openerp-server
-if [[ ! -f $BIN ]]; then
-    BIN=$SRCROOT/odoo-bin
-fi;
+BIN=$SRCROOT/odoo-bin  # our cloud only support >= 11.0
 
 exec $BIN --addons-path=${ADDONS} $OPTIONS "$@"
