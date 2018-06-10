@@ -32,8 +32,8 @@ RUNNING_SERIES=$[$(sudo $CLOUD_DIR/cloud-meta odoo-list-branches | wc -l) + 1]  
 # when we have 1000+ processes, and each worker can create
 # db_maxconn PG worker processes.
 CPU_COUNT=$(grep -c processor /proc/cpuinfo)
-# 6 worker min, 12 workers max
-WORKERS=$(_min $(_max 6 $[CPU_COUNT / 2 + 1]) 12)
+# 3 worker min, 6 workers max
+WORKERS=$(_min $(_max 3 $[CPU_COUNT / 2 + 1]) 6)
 # Only one cron we report failing jobs in +10 rounds
 CRONS=1
 
