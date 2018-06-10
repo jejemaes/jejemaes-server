@@ -254,6 +254,7 @@ def _setup_postgres(version='9.5'):
         fabtools.postgres.create_user('root', 'root', superuser=True)
     if not pg_user_exists('odoo'):
         fabtools.postgres.create_user('odoo', 'odoo', superuser=True)
+        sudo('''psql -tAq -d postgres -c ALTER USER odoo CREATEDB;"''', user='postgres')
 
 
 @task
