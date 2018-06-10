@@ -20,7 +20,7 @@ from functools import wraps
 HERE = os.path.dirname(os.path.realpath(__file__))
 LOCAL_DIR_RESOURCES = HERE + '/resources/'
 
-DIR_SCRIPT = '/root/cloud'
+DIR_SCRIPT = '/root/cloud/'
 SERV_DIR_CLOUD_FILES = '/root/cloud/setup/cloud_files'
 SERV_DIR_CLOUD_SETUP = '/root/cloud/setup'
 SERV_DIR_RESOURCES = '/root/cloud/setup/resources'
@@ -492,8 +492,8 @@ def _odoo_fetch_sources(branch_nick):
     """ Fetch source in src/<version> or update sources """
     for directory, repo_url in ODOO_REPO_DIR_MAP.items():
         current_path = ODOO_DIR_SRC + '/' + directory + '/'
-        if fabtools.files.is_dir(current_path):
-            git_update_directory(current_path)
+        if fabtools.files.is_dir(current_path + branch_nick):
+            git_update_directory(current_path + branch_nick)
         else:
             sudo('mkdir -p {0}'.format(current_path))
             result = git_clone(current_path, repo_url, branch_nick, branch_nick)
