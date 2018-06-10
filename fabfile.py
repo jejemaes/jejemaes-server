@@ -37,7 +37,7 @@ ODOO_DEFAULT_VERSION = '11.0'
 # those github repo should be versionned as the odoo community repo (same branch nickname)
 ODOO_REPO_DIR_MAP = {
     'odoo': 'https://github.com/odoo/odoo.git',
-    #'jejemaes': 'https://github.com/jejemaes/jejemaes-server.git',
+    'jejemaes': 'https://github.com/jejemaes/odoo-custom-addons.git',
 }
 
 # ----------------------------------------------------------
@@ -148,11 +148,6 @@ def git_update_directory(path):
 # ----------------------------------------------------------
 # Deployment / Setup for Odoo and LEMP server
 # ----------------------------------------------------------
-@task
-@as_('root')
-def test():
-    _setup_rsync_files()
-
 
 @task
 @as_('root')
