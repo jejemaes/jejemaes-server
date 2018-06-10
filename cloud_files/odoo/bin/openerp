@@ -44,7 +44,7 @@ if [ -z $LONGPOLLPORT ]; then
     LONGPOLLPORT=$(sudo $CLOUD_DIR/cloud-meta odoo-get-longpolling-port $BRANCH)
 fi
 
-OPTIONS="--unaccent --db_maxconn=32 --no-database-list --xmlrpc-interface=127.0.0.1 --xmlrpc-port=$OE_PORT --proxy-mode --logfile=$HOME/log/openerp-${BRANCH}.log --db-filter=^(%d|saas_master|openerp)\$"
+OPTIONS="--unaccent --db_maxconn=32 --no-database-list --xmlrpc-interface=127.0.0.1 --xmlrpc-port=$OE_PORT --proxy-mode --logfile=$HOME/log/openerp-${BRANCH}.log --db-filter=^(%h)\$"
 OPTIONS="$OPTIONS --longpolling-port=$LONGPOLLPORT --load=$WORKER_ADDONS"
 
 
@@ -64,7 +64,8 @@ CPU_REAL=2700       # downloading a 3GB database backup take a long time...
 CPU_TIME=900
 
 # let enough time to create a demo database it currenlty take around 6min, 20min should be enough for everyone
-OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS --limit-memory-soft=$MEM_SOFT --limit-memory-hard=$MEM_HARD --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
+#OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS --limit-memory-soft=$MEM_SOFT --limit-memory-hard=$MEM_HARD --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
+OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS  --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
 
 
 #if [ "$OE_SMTP" != "mailcatcher" ]; then
