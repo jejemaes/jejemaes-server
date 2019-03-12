@@ -512,6 +512,7 @@ def _odoo_branch2service(branch):
 
 @as_('root')
 def _odoo_create_initd(branch):
+    """ create the initd file for the service """
     ctx = {
         'branch': branch
     }

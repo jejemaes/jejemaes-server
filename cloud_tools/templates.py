@@ -3,7 +3,7 @@
 from mako.template import Template
 
 from . import DIR_TEMPLATE
-
+from . import utils
 
 ######################################################
 ### TEMPLATES
@@ -11,10 +11,7 @@ from . import DIR_TEMPLATE
 
 def load_template(template_name):
     tmpl_file_path = '%s%s.txt' % (DIR_TEMPLATE, template_name)
-    content = ''
-    with open(tmpl_file_path, 'r') as content_file:
-        content = content_file.read()
-    return content
+    return utils.file_read(tmpl_file_path)
 
 
 def render_template(template_name, context):
