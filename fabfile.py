@@ -1,7 +1,18 @@
 #!/usr/bin/env python
-
+"""#
+# to run the script
+#
+#   fab -H root@1.1.1.1.1 setup
+#
+#   fab -H root@1.1.1.1.1 my_task:param1
+#
+# for test
+#   env SAAS_USER=accounts fab -H root@accounts.test.openerp.com update:saas-1
+#
+"""
 import ConfigParser
 import io
+import json
 import os
 import re
 
@@ -92,6 +103,25 @@ def has_systemd():
         with settings(warn_only=True):
             res = run('command -v systemctl')
             return res.return_code == 0
+
+
+def _validate_domain(domain):
+    regex = re.compile(
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|' #domain...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})' # ...or ip
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    return re.match(regex, domain) is not None
+
+
+def slugify(value):
+    name = re.sub('[^\w\s-]', '', value).strip().lower()
+    return name
+
+
+def domain2database(domain):
+    temp_domain = domain[4:] if domain.startswith('www.') else domain
+    slug_name = slugify(temp_domain)
+    return slug_name
 
 
 # fabtools issue: https://github.com/fabtools/fabtools/issues/4
@@ -409,7 +439,6 @@ def setup_odoo_services():  #TODO JEM: not sure this is usefull
         fabtools.systemd.start('nginx')
     fabtools.systemd.enable('nginx')
 
-
 # ----------------------------------------------------------
 # LEMP server
 # ----------------------------------------------------------
@@ -469,19 +498,17 @@ def lemp_create_account(domain, user, password):
 # Odoo Server
 # ----------------------------------------------------------
 
-
 @task
-def deploy_odoo(branch_nick=False):
-    """ Deploy a version of Odoo on the server:
-            - fetch sources
-            - create service
-            - ...
-    """
-    if not branch_nick:
-        branch_nick = ODOO_DEFAULT_VERSION
-
+def odoo_checkout(branch_nick):
+    """ Odoo: deploy (fetch sources, create service, ....) or update code base of given branch (fetch sources, restart service, ....) """
     _odoo_fetch_sources(branch_nick)
-    _odoo_create_initd(branch_nick)
+
+    if not _odoo_is_service_running(branch_nick):  # then create it !
+        _odoo_sync_filestore()
+        sudo('{0}/cloud-meta odoo-add-version {1}'.format(SERV_DIR_CLOUD_SETUP, branch_nick))
+        _odoo_create_initd(branch_nick)
+    else:  # simply restart service after source code checkout
+        _odoo_service_action(branch_nick, 'restart')
 
 
 def _odoo_fetch_sources(branch_nick):
@@ -498,6 +525,15 @@ def _odoo_fetch_sources(branch_nick):
             else:
                 puts(red('Error when fetching Odoo %s sources !' % (branch_nick,)))
         run("chown -R {0}:{0} {1}".format(ODOO_USER, current_path))
+
+
+def _odoo_sync_filestore():
+    # create a filestore directory and symlink from ~/.local to /home/odoo : one filestore per database
+    sudo('mkdir -p {0}/filestore'.format(ODOO_DIR_HOME))
+    # resymlink
+    product = 'Odoo'  # hardcoded (was 'OpenERP' in 8.0)
+    sudo('mkdir -p {0}/.local/share/{1}/sessions'.format(ODOO_DIR_HOME, product))
+    sudo('ln -sfT {0}/filestore {0}/.local/share/{1}/filestore'.format(ODOO_DIR_HOME, product))
 
 
 def _odoo_branch2service(branch):
@@ -532,3 +568,57 @@ def _odoo_create_initd(branch):
         # SysV init
         _upload_template('initd_openerp.tpl', service_path, '0755')
         run('update-rc.d {0} defaults'.format(service_name))
+
+
+def _odoo_is_service_running(branch_nick):
+    """ check if the service of given branch exists and is running """
+    service_name, service_path = _odoo_branch2service(branch_nick)
+    if fabtools.files.is_file(service_path):
+        return fabtools.systemd.is_running(service_name)
+    return False
+
+
+def _odoo_service_action(branch_nick, action):
+    service_name, service_path = _odoo_branch2service(branch_nick)
+
+    if not fabtools.files.is_file(service_path):
+        puts(yellow('service {0} missing: skipping'.format(branch_nick)))
+    else:
+        if has_systemd():
+            getattr(fabtools.systemd, action)(service_name)
+        else:
+            run('{0} {1}'.format(service_path, action))
+
+
+@task
+def odoo_db_add(domain, branch_nick, dbname=False):
+    if not _validate_domain(domain):
+        raise Exception("Given domain is not correct. Got '%s'." % (domain,))
+
+    if not dbname:
+        dbname = domain2database(domain)
+
+    # insert meta entry
+    sudo('{0}/cloud-meta odoo-add-database {1} {2} {3}'.format(SERV_DIR_CLOUD_SETUP, domain, branch_nick, dbname))
+
+    # create nginx file
+    odoo_create_nginx_config(dbname)
+
+
+@task
+def odoo_create_nginx_config(dbname):
+    """ Create the nginx config file and restart nginx service
+        :param dbname: name of the database to (re)generate the config file
+    """
+    dbinfo_str = sudo('{0}/cloud-meta odoo-get-info {1}'.format(SERV_DIR_CLOUD_SETUP, dbname))
+    dbinfo = json.loads(dbinfo_str)
+
+    # create nginx file
+    upload_template(os.path.join(LOCAL_DIR_RESOURCES, 'nginx_openerp.tpl'), '/etc/nginx/sites-availables/%s' % (dbname,), dbinfo, backup=False, mode='0644')
+    run("ln -sfT /etc/nginx/sites-availables/%s /etc/nginx/sites-enabled/%s" % (dbname, dbname))
+
+    # restart nginx
+    if fabtools.systemd.is_running('nginx'):
+        fabtools.systemd.restart('nginx')
+    else:
+        fabtools.systemd.start('nginx')

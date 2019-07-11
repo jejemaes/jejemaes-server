@@ -67,13 +67,6 @@ CPU_TIME=900
 #OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS --limit-memory-soft=$MEM_SOFT --limit-memory-hard=$MEM_HARD --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
 OPTIONS="$OPTIONS --workers=$WORKERS --max-cron-threads=$CRONS  --limit-time-real=$CPU_REAL --limit-time-cpu=$CPU_TIME"
 
-
-#if [ "$OE_SMTP" != "mailcatcher" ]; then
-#    OPTIONS="$OPTIONS --smtp=${OE_SMTP:-mailsaas1.odoo.com} --smtp-port=2525 --smtp-ssl --smtp-user=odoo --smtp-password=tinies07"
-#else
-#    OPTIONS="$OPTIONS --smtp=localhost --smtp-port=1025"
-#fi;
-
 # NOTE: DO NOT use new cli syntax as it has nasty side effect when importing all modules
 # in non-topological order. As saas-dump dir is not cleared at module load since a few months,
 # this hack is not needed anymore.
